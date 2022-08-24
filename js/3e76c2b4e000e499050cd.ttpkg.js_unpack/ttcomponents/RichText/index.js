@@ -1,0 +1,2 @@
+define("ttcomponents/RichText/index.js",(function(e,t,r,n,s,a,i,o,x,c,d,v,p,f,g,h,u,l,m,w,P,T,b,j,k,C,O,y,A,E,R,S,q){var z=e("../wxParse/wxParse.js");Component({properties:{text:{type:String,default:"",observer:"textObserver"}},data:{vnode:{}},methods:{textObserver:function(e){z.wxParse("vnode","html",e,this,5)},wxParseTagATap:function(e){var t=e.currentTarget.dataset.src;t&&this.triggerEvent("linkClick",[t])}}})}));
+//# sourceMappingURL=index.js.map

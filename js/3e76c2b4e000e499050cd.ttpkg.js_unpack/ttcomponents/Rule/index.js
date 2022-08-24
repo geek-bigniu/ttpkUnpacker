@@ -1,0 +1,2 @@
+define("ttcomponents/Rule/index.js",(function(e,t,r,n,s,a,i,l,o,u,d,v,c,p,f,g,x,h,m,w,P,b,T,j,k,y,C,O,S,A,E,R,q){var z=e("../wxParse/wxParse.js");Component({properties:{title:{type:String,default:""},rule:{type:String,default:"",observer:"ruleObserver"}},data:{vnode:null},methods:{ruleObserver:function(e,t){e&&e!==t&&z.wxParse("vnode","html",e,this,5)},wxParseTagATap:function(e){var t=e.currentTarget.dataset.src;this.triggerEvent("linkClick",[t])}}})}));
+//# sourceMappingURL=index.js.map

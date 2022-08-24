@@ -1,0 +1,1 @@
+window.__pageEnterTime__=Date.now(),putCssToHead([".wrapper-hidden",[1],".data-v-7dae3c22",[1],"{position:fixed;width:100%;height:100%;overflow:hidden}"],"","tt-s-t4hrN55B");var generateFunc=window.app["pages/detail/index"];location.hash="pages/detail/index",document.dispatchEvent(new CustomEvent("generateFuncReady",{detail:{generateFunc:generateFunc}}));
