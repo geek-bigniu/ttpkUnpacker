@@ -5,7 +5,7 @@ from util.io_helper import IOHelper
 MPK_MAGIC = 'TPKG'
 MPK_VERSION = 131072
 
-
+# Author 52pojie l2399007164
 class MPK:
     def __init__(self, io):
         self._io = io
@@ -13,24 +13,28 @@ class MPK:
         self._version = MPK_VERSION
 
     @staticmethod
+    def printTell(io):
+        print(io.tell())
+    @staticmethod
     def load(io: FileIO):
         instance = MPK(io)
         magic = IOHelper.read_ascii_string(io, 4)
         if magic == MPK_MAGIC:
             version = IOHelper.read_struct(io, '<i')[0]
-            io.seek(1, SEEK_CUR)
-            count = IOHelper.read_struct(io, '>i')[0]
-
+            MPK.printTell(io)
+            io.seek(4, SEEK_CUR)
+            MPK.printTell(io)
+            count = IOHelper.read_struct(io, 'i')[0]
             # io.seek(52, SEEK_CUR)
             instance.set_version(version)
             for i in range(count):
                 if i==0:
-                    size = '>i'
+                    size = 'i'
                 else:
                     size='i'
                 name_length = IOHelper.read_struct(io, size)[0]
-                if i==0:
-                    io.seek(3, SEEK_CUR)
+                # if i==0:
+                #     io.seek(3, SEEK_CUR)
                 file_data = IOHelper.read_struct(io, '<'+str(name_length)+'s')[0]
                 file_name = bytes(file_data).decode(encoding='ascii')
                 offset = IOHelper.read_struct(io, '=i')[0]

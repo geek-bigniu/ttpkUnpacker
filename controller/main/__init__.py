@@ -2,18 +2,20 @@ import os
 
 from model.mpk import MPK
 
-
+# Author 52pojie l2399007164
 class Main:
     def __init__(self, args):
         self._args = args
 
     def run(self):
+        if(len(self._args)<2):
+            print("Use :python3 main.py js/xxx.ttpkg.js")
+            exit()
         for arg in self._args[1:]:
-            with open(arg, 'rb') as io:
+            with open(arg, 'rb') as pkgfile:
                 _, file_arg = os.path.split(arg)
                 print('Loading: %s' % arg)
-                mpk = MPK.load(io)
-
+                mpk = MPK.load(pkgfile)
                 for i in mpk.files:
                     file = mpk.file(i)
                     if file['offset'] != 0:

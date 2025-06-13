@@ -1,1 +1,0 @@
-window.__pageEnterTime__=Date.now(),putCssToHead([".banner-wrapper",[1],".data-v-2dcdbec4",[1],"{padding:",40," ",40," 0}"],"","tt-s-6B0cjRsk");var generateFunc=window.app["pages/activity-calendar/index"];location.hash="pages/activity-calendar/index",document.dispatchEvent(new CustomEvent("generateFuncReady",{detail:{generateFunc:generateFunc}}));

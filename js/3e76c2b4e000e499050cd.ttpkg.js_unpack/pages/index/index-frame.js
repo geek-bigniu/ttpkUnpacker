@@ -1,1 +1,0 @@
-window.__pageEnterTime__=Date.now();var generateFunc=window.app["pages/index/index"];location.hash="pages/index/index",document.dispatchEvent(new CustomEvent("generateFuncReady",{detail:{generateFunc:generateFunc}}));
