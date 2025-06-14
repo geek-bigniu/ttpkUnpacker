@@ -140,6 +140,8 @@ def process_ttss(fname):
 def parseputCssToHead(source, fname):
     # 处理putCssToHead
     token = ".wxss"
+    if "putCssToHead" not in source:
+        return
     jsons = source.split("putCssToHead(")
     for j in jsons:
         if fname.endswith("page-frame.js"):
@@ -158,7 +160,7 @@ def parseputCssToHead(source, fname):
                 except Exception as e:
                     logger.info(e)
         else:
-            # logger.info("其他文件的处理方式" + fname)
+            logger.info("其他文件的处理方式" + fname)
             index = j.find('),",', 0)
             index1 = j.find(');var', 0)
             if index == -1 and index1 == -1:
@@ -174,7 +176,7 @@ def parseputCssToHead(source, fname):
                 COMMON_STYLESHEETS[filename] = content
                 write_to_file(filename, content, OUTPUT_FOLDER)
             except Exception as e:
-                logger.info(e)
+                logger.error(f"解析ttss文件失败:{fname} {e}")
 
 
 def get_wxss_content(buf):
@@ -331,18 +333,18 @@ def main(output_folder, input_file):
     file = '/page-frame.js'
     OUTPUT_FOLDER = output_folder  # 设置全局变量
     # 删除输出文件夹
-    # rm(OUTPUT_FOLDER)
+    rm(OUTPUT_FOLDER)
     # 创建输出文件夹
-    # md(OUTPUT_FOLDER)
+    md(OUTPUT_FOLDER)
     # 开始解包小程序包
     logger.info("Unpacking package...")
-    # process_package(input_file)
+    process_package(input_file)
     # 反编译全局的 ttss 文件
-    # process([file], process_ttss)
+    process([file], process_ttss)
     # 反编译每个界面的 ttss 文件
-    # processPageTtss()
+    processPageTtss()
     # 构造 page.json 文件
-    # processPageJSON()
+    processPageJSON()
     # 通过 AST 反编译 ttml 文件
     processTtmlByAst(file)
     logger.info("Operation completed successfully!")

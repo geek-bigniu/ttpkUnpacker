@@ -8,7 +8,12 @@ from loguru import logger
 
 # 1. 为不同输出设置不同日志级别
 def set_level_for_handlers():
+    logger.remove()
     # 添加文件输出，记录 DEBUG 及以上级别
+    logger.add(
+        sys.stdout,
+        level="INFO",
+    )
     logger.add(
         "logs/app_{time}.log",
         level="DEBUG",  # 设置文件输出最低级别为 DEBUG
@@ -53,7 +58,7 @@ class ASTConverter:
     def parse_ast(self) -> None:
         try:
             self.ast = esprima.parseScript(self.js_code)
-            logger.info("成功解析 JavaScript 代码")
+            # logger.info("成功解析 JavaScript 代码")
         except Exception as e:
             logger.error(f"解析 JavaScript 失败: {e}")
             raise SystemExit(1)
@@ -320,6 +325,8 @@ class ASTConverter:
                     ttml += " src=\"%s\"" % ("{{" + path + "}}")
                 elif value.type =='Literal':
                     ttml += " src=\"%s\"" % value.value
+                elif value.type =='Identifier':
+                    ttml += " src=\"%s\"" % ("{{" + context.get_param(value.name) + "}}")
                 elif hasattr(value, 'raw') and value.raw is not None:
                     ttml += " src=\"%s\"" % ("{{" + value.raw.strip('"') + "}}")
                 else:
@@ -604,6 +611,9 @@ class ASTConverter:
             if node.arguments[0].type == 'Literal':
                 path = node.arguments[0].value
                 ttml += "  " * indent + path + "\n"
+            elif node.arguments[0].type=='BinaryExpression':
+                path = self.extract_path(node.arguments[0], context, for_loop=False)
+                ttml += "  " * indent + "{{" + path + "}}" + "\n"
             else:
                 logger.error(f"尝试处理未知节点：{node.arguments[0].type}")
                 path = self.extract_path(node.arguments[0], context, for_loop=False)
@@ -718,7 +728,7 @@ def run(js_code: str, pagePath: dict, output_file: str = "output.ttml") -> None:
     ttml_content = converter.convert()
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(ttml_content)
-    logger.info(f"TTML 内容已生成到 {output_file}")
+    # logger.info(f"TTML 内容已生成到 {output_file}")
 
 
 if __name__ == "__main__":
