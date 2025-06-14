@@ -2,8 +2,9 @@
 <div style="color: red">ps:暂时还不能解抖音小游戏的包。</div>
 
 抖音小程序解包工具（文件开头是TPKG开头的包），支持.pkg文件和.ttpkg.js文件
+ ![img/img2.png](img/img2.png)
 
- > 解包原理可以看这篇文章 [https://www.52pojie.cn/thread-1684583-1-1.html](https://www.52pojie.cn/thread-1684583-1-1.html)
+ 解包原理可以看这篇文章 [https://www.52pojie.cn/thread-1684583-1-1.html](https://www.52pojie.cn/thread-1684583-1-1.html)
  
 ### 功能列表
  - [x] 一键解包成项目结构
