@@ -14,7 +14,8 @@ class MPK:
 
     @staticmethod
     def printTell(io):
-        print(io.tell())
+        pass
+        # print(io.tell())
     @staticmethod
     def load(io: FileIO):
         instance = MPK(io)
@@ -39,7 +40,6 @@ class MPK:
                 file_name = bytes(file_data).decode(encoding='ascii')
                 offset = IOHelper.read_struct(io, '=i')[0]
                 data_size = IOHelper.read_struct(io, '=i')[0]
-                print(file_name)
                 instance.insert_file({
                     'is_zip': False,
                     'index': i,

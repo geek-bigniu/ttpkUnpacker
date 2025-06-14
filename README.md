@@ -1,33 +1,43 @@
 # ttpkgUnpacker 抖音小程序解包工具
-<div style="color: red">ps:暂时还不能解抖音小游戏的包。</div>
 
-抖音小程序解包工具（文件开头是TPKG开头的包），支持.pkg文件和.ttpkg.js文件
- ![img/img2.png](img/img2.png)
+> **注意**：目前暂不支持解包抖音小游戏的包。  
+> 适用于文件开头为 `TPKG` 的抖音小程序包，支持 `.pkg` 文件和 `.ttpkg.js` 文件。
 
- 解包原理可以看这篇文章 [https://www.52pojie.cn/thread-1684583-1-1.html](https://www.52pojie.cn/thread-1684583-1-1.html)
- 
-### 功能列表
- - [x] 一键解包成项目结构
- - [x] 提取ttss文件
- - [x] 提取ttml文件
-## 依赖库支持
-- esprima
-> pip install esprima
-## 项目运行
-> python ttpkg.py -i js/e2670a8.pkg -o output
+![示例图片](img/img2.png)
 
+**解包原理**：可参考文章 [抖音小程序解包原理](https://www.52pojie.cn/thread-1684583-1-1.html)
+
+## 功能列表
+- ✅ 一键解包生成项目结构
+- ✅ 提取 `ttss` 文件
+- ✅ 提取 `ttml` 文件
+
+## 依赖库
+- `esprima`
+  ```bash
+  pip install esprima
+  ```
+## 使用帮助
+### 命令行用法
+```bash
+# 解包单个 .pkg 文件
+python ttpkg.py -i js/e2670a8.pkg -o output
+
+# 解包 js 目录下所有 .pkg 文件
+python ttpkg.py -i js/
+```
+### 命令行参数说明
 ```bash                  
-usage: python ttpkg.py [-h] -i INPUT_FILE [-o OUTPUT_FOLDER]
+usage: ttpkg.py [-h] -i INPUT [-o OUTPUT_FOLDER]
 
 pkg文件路径
 
 optional arguments:
   -h, --help            show this help message and exit
-  -i INPUT_FILE, --input_file INPUT_FILE
-                        输入pkg文件 (e.g., 'js/e2670a8.pkg')
+  -i INPUT, --input INPUT
+                        输入pkg文件或文件夹 (e.g., 'js/e2670a8.pkg' or 'js/')
   -o OUTPUT_FOLDER, --output_folder OUTPUT_FOLDER
                         输出目录 (默认: 'output')
-
 ```
 
 ## 小程序包提取方法
@@ -35,12 +45,17 @@ optional arguments:
  - MT文件管理器
  - 抖音
 
-1. 在手机安装抖音并打开你要提取的小程序**并等待加载完毕**，然后继续下一步
-2. 使用`MT文件管理器`打开目录`/data/data/com.ss.android.ugc.aweme/files/bdp/launchcache/`可以看到很多`appid_`开头的文件夹
+1. 在手机上安装抖音，打开需要提取的小程序，**确保加载完成**后继续。
+2. 使用`MT文件管理器`打开以下目录目录
+```text
+/data/data/com.ss.android.ugc.aweme/files/bdp/launchcache/
+```
+可以看到很多`appid_`开头的文件夹
 
-   ![img/img.png](img/img.png)
+> ![pkg文件示例](img/img.png)
 3. 点击右上角三个点，选择排序方式，按时间-逆向排序，确定
-4. 你刚打开的小程序就是第一个appid_开头的了，接着打开它，然后有个ver_开头的文件夹，再打开，里面就有`.pkg`文件了，有分包的会有多个`.pkg`文件,如果不能确定是不是你想导出的小程序，可以查看`.meta`文件，里面能看到小程序的名称
-
+4. 最新打开的小程序对应的文件夹会排在第一个。进入该 `appid_` 文件夹，再进入以 `ver_` 开头的子文件夹，找到 `.pkg` 文件（分包情况下可能有多个 `.pkg` 文件）。
+    > 提示：不确定是否为目标小程序？查看`.meta`文件可以看到小程序名称
    ![img/img1.png](img/img1.png)
-5. 选择你要导出的包，复制到`/sdcard/`目录下，然后现在才可以分享到微信或者qq。因为/data/data/目录其他程序没root权限没法访问到，所以会分享失败，或者你用adb导出，哈哈
+5. 选择需要导出的`.pkg`文件复制到`/sdcard/`目录，然后微信或者qq分享。由于`/data/data/`目录需要root权限，其他程序无法直接访问，分享前需先复制到`/sdcard`。
+    > ”替代方法：使用`adb`命令导出文件。“
