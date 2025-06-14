@@ -88,7 +88,7 @@ class ASTConverter:
                 for modelName in importModelList:
                     import_name = modelName.object.name.replace("$m_", "")
                     self.importTpls[import_name] = self.pagePath[import_name]
-                    print("找到导包函数", declarator.id.name, import_name)
+                    # logger.info("找到导包函数", declarator.id.name, import_name)
             elif init.type == 'SequenceExpression' and init.expressions[0].type == 'MemberExpression' and \
                     init.expressions[0].property.name == 'VOID':
 

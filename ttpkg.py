@@ -127,7 +127,7 @@ def process_ttss(fname):
         else:
             # 遍历文件名和内容
             for filename in ttss_list:
-                content = get_wxss_content(ttss_list[filename])
+                content = get_ttss_content(ttss_list[filename])
 
                 logger.info(f"Processing {filename}")
                 COMMON_STYLESHEETS[filename] = content
@@ -152,7 +152,7 @@ def parseputCssToHead(source, fname):
                 try:
                     buf = eval('[' + j[0:index].replace("undefined", '[]').replace("path", '"path"') + '.ttss"]')
                     filename = buf[1]
-                    content = get_wxss_content(buf[0])
+                    content = get_ttss_content(buf[0])
 
                     logger.info(f"Processing {filename}")
                     COMMON_STYLESHEETS[filename] = content
@@ -160,7 +160,7 @@ def parseputCssToHead(source, fname):
                 except Exception as e:
                     logger.info(e)
         else:
-            logger.info("其他文件的处理方式" + fname)
+            # logger.info("其他文件的处理方式" + fname)
             index = j.find('),",', 0)
             index1 = j.find(');var', 0)
             if index == -1 and index1 == -1:
@@ -170,7 +170,7 @@ def parseputCssToHead(source, fname):
                 buf = eval('[' + j[0:index].replace("undefined", '[]').replace("path", '"path"') + ']')
                 delete_file(fname)
                 filename = fname.replace("-frame.js", '.ttss').replace(OUTPUT_FOLDER + '/', '')
-                content = get_wxss_content(buf[0])
+                content = get_ttss_content(buf[0])
 
                 logger.info(f"Processing {filename}")
                 COMMON_STYLESHEETS[filename] = content
@@ -179,10 +179,9 @@ def parseputCssToHead(source, fname):
                 logger.error(f"解析ttss文件失败:{fname} {e}")
 
 
-def get_wxss_content(buf):
+def get_ttss_content(buf):
     if type(buf).__name__ == "str":
         return buf
-
     content = ""
     for item in buf:
         if type(item).__name__ == "str":
@@ -284,6 +283,8 @@ def process_package(file):
                 os.makedirs(dir_file, exist_ok=True)
                 with open(path_file, 'wb') as io_file:
                     io_file.write(mpk.data(i))
+
+
 # OUT_PATH = "js/038d897.ttpkg.js_unpack/"
 
 def processTtmlByAst(file_path):
