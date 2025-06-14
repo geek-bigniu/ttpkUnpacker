@@ -1,3 +1,4 @@
+import re
 import sys
 
 import esprima
@@ -55,61 +56,6 @@ class ASTConverter:
         self.pagePath = pagePath
         self.templateList = []
 
-    def parse_ast(self) -> None:
-        try:
-            self.ast = esprima.parseScript(self.js_code)
-            # logger.info("成功解析 JavaScript 代码")
-        except Exception as e:
-            logger.error(f"解析 JavaScript 失败: {e}")
-            raise SystemExit(1)
-
-    def extract_variable_mappings(self, node: Any) -> Dict[str, str]:
-        if not hasattr(node, 'type') or node.type != 'VariableDeclaration':
-            return {}
-        mappings = {}
-        for declarator in node.declarations:
-            var_name = declarator.id.name
-            init = declarator.init
-            if init is None:
-                logger.debug(f"Variable {var_name} has no initializer")
-                continue
-            if init.type == 'Identifier':
-                mappings[var_name] = init.name
-            elif init.type == 'MemberExpression':
-                prop = init.property.name if init.property.type == 'Identifier' else init.property.value
-                mappings[var_name] = f"$.{prop}"
-            elif init.type == 'CallExpression':
-                if len(init.arguments) == 1:
-                    mappings[var_name] = init.arguments[0].value.replace("tt-", "")
-                elif init.callee.type == 'MemberExpression':
-                    mappings[var_name] = init.callee.property.name
-            elif init.type == 'FunctionExpression' and declarator.id.name == '$':
-                importModelList = init.body.body[0].argument.arguments[1:]
-                for modelName in importModelList:
-                    import_name = modelName.object.name.replace("$m_", "")
-                    self.importTpls[import_name] = self.pagePath[import_name]
-                    # logger.info("找到导包函数", declarator.id.name, import_name)
-            elif init.type == 'SequenceExpression' and init.expressions[0].type == 'MemberExpression' and \
-                    init.expressions[0].property.name == 'VOID':
-
-                express_1 = init.expressions[1]
-                if express_1.type == 'MemberExpression':
-                    prop = express_1.property.name if express_1.property.type == 'Identifier' else express_1.property.value
-                    mappings[var_name] = f"$.{prop}"
-                elif express_1.type == "CallExpression" and mappings[
-                    express_1.callee.name] == '$.resolveBuiltinComponent':
-                    prop = express_1.arguments[0].value.replace("tt-", "")
-                    mappings[var_name] = prop
-                    pass
-            elif init.type == 'ObjectExpression' and len(init.properties) == 0:
-                # tpls的空对象
-                mappings[var_name] = "$.tpls"
-                pass
-            else:
-                logger.warning(f"未处理的参数：{init.type}")
-
-        return mappings
-
     def extract_path(self, node: Any, context: Context, for_loop: bool = False, for_class: bool = False) -> str:
         if not hasattr(node, 'type'):
             logger.warning(f"无效节点: {node}")
@@ -119,7 +65,7 @@ class ASTConverter:
 
         if node.type == 'MemberExpression':
             obj = self.extract_path(node.object, context, for_loop)
-            prop = node.property.name if hasattr(node.property, 'name') else node.property.value
+            prop = self.extract_path(node.object, context, for_loop)
             if obj == "data":
                 return prop
             if context.get_param(obj) == "data":
@@ -167,7 +113,9 @@ class ASTConverter:
             argument = self.extract_path(node.argument, context, for_loop, for_class)
             if operator == '!':
                 return f"!{argument}"
-            elif operator=='void':
+            elif operator == '-':  # 添加对一元负号的支持
+                return f"-{argument}"
+            elif operator == 'void':
                 return 'undefined'
             logger.warning(f"未支持的 UnaryExpression 运算符: {operator}")
             return 'unknown'
@@ -230,6 +178,11 @@ class ASTConverter:
                 return list_path if list_path != 'unknown' else 'unknown'
             elif node.callee.type == 'MemberExpression':
                 return self.extract_path(node.arguments[0], context, for_loop, for_class)
+        elif node.type == 'ArrayExpression':
+            if len(node.elements) > 0:
+                return self.extract_path(node.elements[0], context, for_loop, for_class)
+            else:
+                return '[]'
 
         logger.warning(f"未处理节点类型: {node.type}")
         return 'unknown'
@@ -317,15 +270,15 @@ class ASTConverter:
                 if value is None or not hasattr(value, 'type'):
                     logger.warning(f"无效 src 属性: {value}")
                     ttml += ' src=""'
-                elif value.type in ['BinaryExpression', 'CallExpression', 'MemberExpression','LogicalExpression']:
+                elif value.type in ['BinaryExpression', 'CallExpression', 'MemberExpression', 'LogicalExpression']:
                     path = self.extract_path(value, context).replace("\"", "'")
                     ttml += f' src="{{{{{path}}}}}"' if path != 'unknown' else ' src=""'
                 elif value.type == 'ConditionalExpression':
                     path = self.extract_path(value, context).replace("\"", "'")
                     ttml += " src=\"%s\"" % ("{{" + path + "}}")
-                elif value.type =='Literal':
+                elif value.type == 'Literal':
                     ttml += " src=\"%s\"" % value.value
-                elif value.type =='Identifier':
+                elif value.type == 'Identifier':
                     ttml += " src=\"%s\"" % ("{{" + context.get_param(value.name) + "}}")
                 elif hasattr(value, 'raw') and value.raw is not None:
                     ttml += " src=\"%s\"" % ("{{" + value.raw.strip('"') + "}}")
@@ -465,7 +418,29 @@ class ASTConverter:
                     # 确保路径是从根目录开始，需要添加/开头
                     ttml += "  " * indent + f"<import src=\"/{self.importTpls[importPage]}\"/>\n"
                 ttml += "  " * indent + f"<template is=\"{{{{{isValue}}}}}\"></template>"
-
+            if importList.type == 'Identifier' and re.match("[a-zA-z]",importList.name):
+                logger.warning(f"尝试处理导入函数类型:{importList.name},暂未完善该功能，导出内容可能有问题")
+                context_params = {}
+                data_value = "{"
+                index = 0
+                for arg in node.arguments[3].properties:
+                    context_params[arg.key.name] = context.get_param(arg.value.name)
+                    data_value += str(arg.key.name) + ":" + str(context.get_param(arg.value.name))
+                    if index != len(node.arguments[3].properties) - 1:
+                        data_value += ","
+                    index += 1
+                data_value += "}"
+                new_context = Context(
+                    params=context_params,
+                    variables={},
+                    parent=context
+                )
+                self.contexts.append(new_context)
+                isValue = self.extract_path(node.arguments[2], new_context)
+                ttml += "  " * indent + f"<template is=\"{{{{{isValue}}}}}\" data=\"{{{{{data_value}}}}}\"></template>"
+                self.contexts.pop()
+            else:
+                logger.warning(f"无法处理的导入函数类型:{importList.name},常规导入为$")
         elif node.type == 'ConditionalExpression':
             condition = self.extract_path(node.test, context)
             if condition == 'unknown':
@@ -480,7 +455,7 @@ class ASTConverter:
                 elif node.test.type == 'UnaryExpression' and node.test.operator == '!':
                     condition = self.extract_path(node.test.argument, context)
                 elif node.test.type == 'LogicalExpression':
-                    condition = self.extract_path(node.test,context)
+                    condition = self.extract_path(node.test, context)
 
                 else:
                     logger.warning(f"无法反转条件: {node.test.type}")
@@ -611,9 +586,11 @@ class ASTConverter:
             if node.arguments[0].type == 'Literal':
                 path = node.arguments[0].value
                 ttml += "  " * indent + path + "\n"
-            elif node.arguments[0].type=='BinaryExpression':
+            elif node.arguments[0].type == 'BinaryExpression':
                 path = self.extract_path(node.arguments[0], context, for_loop=False)
                 ttml += "  " * indent + "{{" + path + "}}" + "\n"
+            elif node.arguments[0].type == 'CallExpression':
+                ttml += self.convert_to_ttml(node.arguments[0], indent, context)
             else:
                 logger.error(f"尝试处理未知节点：{node.arguments[0].type}")
                 path = self.extract_path(node.arguments[0], context, for_loop=False)
@@ -622,16 +599,107 @@ class ASTConverter:
             # 单纯变量不处理
             pass
         elif node.type == 'CallExpression' and hasattr(node.callee, 'name') and self.global_vars.get(
-            node.callee.name) == '$.renderSlot':
+                node.callee.name) == '$.renderSlot':
             arguments = node.arguments
             name = arguments[1].value
             ttml += "  " * indent + f"<slot name=\"{name}\">\n"
-            ttml += self.convert_to_ttml(arguments[2],indent,context)
+            ttml += self.convert_to_ttml(arguments[2], indent, context)
             ttml += "  " * indent + "</slot>\n"
 
         else:
             logger.warning(f"无法处理的节点类型: {node.type}")
         return ttml
+
+    def convert_to_template(self):
+        templates = []
+        for template in self.templateList:
+            left = template.left
+            right = template.right
+            name = left.property.value if left.property.value else left.property.name
+            if name == 'render':
+                # 普通内容渲染函数，直接跳过
+                continue
+            params = right.params
+            new_context = Context(
+                params={params[0].name: "data",
+                        params[1].name: "ctx"
+                        },
+                variables={},
+                parent=self.contexts[0]
+            )
+            self.contexts.append(new_context)
+            render_body = None
+            for node in right.body.body:
+                if node.type == 'VariableDeclaration':
+                    self.contexts[1].variables.update(self.extract_variable_mappings(node))
+                    logger.debug(f"Template variables updated: {self.contexts[1].variables}")
+                if node.type == 'ReturnStatement':
+                    render_body = node.argument
+            if render_body is not None and name is not None:
+                ttml_content = f'<template name="{name}">\n'
+                ttml_content += self.convert_to_ttml(render_body, context=self.contexts[1])
+                ttml_content += "</template>"
+                templates.append(ttml_content)
+            self.contexts.pop()
+
+        return "\n".join(templates)
+        pass
+
+    def parse_ast(self) -> None:
+        try:
+            self.ast = esprima.parseScript(self.js_code,locale=True)
+            # logger.info("成功解析 JavaScript 代码")
+        except Exception as e:
+            logger.error(f"解析 JavaScript 失败: {e}")
+            raise SystemExit(1)
+
+    def extract_variable_mappings(self, node: Any) -> Dict[str, str]:
+        if not hasattr(node, 'type') or node.type != 'VariableDeclaration':
+            return {}
+        mappings = {}
+        for declarator in node.declarations:
+            var_name = declarator.id.name
+            init = declarator.init
+            if init is None:
+                logger.debug(f"Variable {var_name} has no initializer")
+                continue
+            if init.type == 'Identifier':
+                mappings[var_name] = init.name
+            elif init.type == 'MemberExpression':
+                prop = init.property.name if init.property.type == 'Identifier' else init.property.value
+                mappings[var_name] = f"$.{prop}"
+            elif init.type == 'CallExpression':
+                if len(init.arguments) == 1:
+                    mappings[var_name] = init.arguments[0].value.replace("tt-", "")
+                elif init.callee.type == 'MemberExpression':
+                    mappings[var_name] = init.callee.property.name
+            elif init.type == 'FunctionExpression':
+                importModelList = init.body.body[0].argument.arguments[1:]
+                for modelName in importModelList:
+                    if modelName.object is not None:
+                        import_name = modelName.object.name.replace("$m_", "")
+                        self.importTpls[import_name] = self.pagePath[import_name]
+                        # logger.info("找到导包函数", declarator.id.name, import_name)
+            elif init.type == 'SequenceExpression' and init.expressions[0].type == 'MemberExpression' and \
+                    init.expressions[0].property.name == 'VOID':
+
+                express_1 = init.expressions[1]
+                if express_1.type == 'MemberExpression':
+                    prop = express_1.property.name if express_1.property.type == 'Identifier' else express_1.property.value
+                    mappings[var_name] = f"$.{prop}"
+                elif express_1.type == "CallExpression" and mappings[
+                    express_1.callee.name] == '$.resolveBuiltinComponent':
+                    prop = express_1.arguments[0].value.replace("tt-", "")
+                    mappings[var_name] = prop
+                    pass
+            elif init.type == 'ObjectExpression' and len(init.properties) == 0:
+                # tpls的空对象
+                mappings[var_name] = "$.tpls"
+                pass
+            else:
+                logger.warning(f"未处理的参数：{init.type}")
+
+        return mappings
 
     def convert(self) -> str:
         self.parse_ast()
@@ -644,12 +712,15 @@ class ASTConverter:
                     for expression in objFun.expression.expressions:
                         if expression.left and expression.left.property and expression.left.property.name == 'render':
                             render_function = expression.right
-                    break
-            if render_function == None:
-                logger.error("未找到render函数", create_commonjs_module)
-                return
+                            break
+                    if render_function is not None:
+                        break
+
         else:
             render_function = create_commonjs_module[1].expression.expressions[1].right
+        if render_function == None:
+            logger.error("未找到render函数", create_commonjs_module)
+            return ""
         logger.debug(f"render_function: {render_function.type}")
 
         render_params = render_function.params
@@ -663,8 +734,10 @@ class ASTConverter:
                 self.global_vars.update(self.extract_variable_mappings(node))
                 logger.debug(f"Global variables updated: {self.global_vars}")
             if node.type == 'ExpressionStatement':
-                # 模板定义处理
-                self.templateList = node.expression.expressions
+                for item in node.expression.expressions:
+                    if item.type == "AssignmentExpression" and item.left.type == "MemberExpression" and item.right.type == "FunctionExpression":
+                        # 模板定义处理
+                        self.templateList.append(item)
 
         for node in render_function.body.body:
             if node.type == 'VariableDeclaration':
@@ -686,49 +759,12 @@ class ASTConverter:
         ttml_content += ""
         return ttml_content
 
-    def convert_to_template(self):
-        templates = []
-        for template in self.templateList:
-            if template.type == "AssignmentExpression" and template.left.type == "MemberExpression" and template.right.type == "FunctionExpression":
-                left = template.left
-                right = template.right
-                name = left.property.value
-                if name == 'render':
-                    # 普通内容渲染函数，直接跳过
-                    continue
-                params = right.params
-                new_context = Context(
-                    params={params[0].name: "_data",
-                            params[1].name: "_ctx"
-                            },
-                    variables={},
-                    parent=self.contexts[0]
-                )
-                self.contexts.append(new_context)
-                render_body = None
-                for node in right.body.body:
-                    if node.type == 'VariableDeclaration':
-                        self.contexts[1].variables.update(self.extract_variable_mappings(node))
-                        logger.debug(f"Template variables updated: {self.contexts[1].variables}")
-                    if node.type == 'ReturnStatement':
-                        render_body = node.argument
-                if render_body is not None and name is not None:
-                    ttml_content = f'<template name="{name}">\n'
-                    ttml_content += self.convert_to_ttml(render_body, context=self.contexts[1])
-                    ttml_content += "</template>"
-                    templates.append(ttml_content)
-                self.contexts.pop()
-
-        return "\n".join(templates)
-        pass
-
 
 def run(js_code: str, pagePath: dict, output_file: str = "output.ttml") -> None:
     converter = ASTConverter(js_code, pagePath=pagePath)
     ttml_content = converter.convert()
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(ttml_content)
-    # logger.info(f"TTML 内容已生成到 {output_file}")
 
 
 if __name__ == "__main__":
@@ -736,8 +772,10 @@ if __name__ == "__main__":
         # 这里是单文件调试，输入对应的page-frame.js文件对应的地址，可以吧page-frame.js的内容复制到js_code.js里进行调试
         with open("js_code.js", mode="r", encoding="utf-8") as file:
             js_code = "".join(file.readlines())
-        pagePath = {'PagesAPIInlinecomponents_d88ee561': "pages/API/inline-components.ttml"}
+        pagePath = {'Base_593616de': "pages/API/inline-components.ttml"}
+        output_file = "output.ttml"
         run(js_code, pagePath)
+        logger.info(f"TTML 内容已生成到 {output_file}")
     except FileNotFoundError:
         logger.error("未找到 js_code.js 文件")
         raise SystemExit(1)

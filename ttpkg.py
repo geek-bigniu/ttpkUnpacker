@@ -9,7 +9,7 @@ from loguru import logger
 
 OUTPUT_FOLDER = ""
 COMMON_STYLESHEETS = {}
-
+PAGE_LIST = {}
 
 # 根据开始字符串和结束字符串裁剪字符串内容
 def get_string_by_seperators(source, begin_str, end_str, begin_index):
@@ -106,13 +106,13 @@ def write_to_file(filename, content, output_dir="output"):
 
 def find_pkg_files(directory_path):
     """
-    查找指定文件夹下所有以 .pkg 或 .ttpkg.js 结尾的文件，并返回文件名列表。
+    查找指定文件夹下所有以 .pkg 或 .ttpkg.js 结尾的文件，并按文件大小从大到小排序返回文件名列表。
 
     Args:
         directory_path (str): 要扫描的文件夹路径。
 
     Returns:
-        list: 包含符合条件的文件名（不含路径）的列表。
+        list: 包含符合条件的文件名（不含路径）的列表，按文件大小从大到小排序。
 
     Raises:
         ValueError: 如果输入路径无效或不是文件夹。
@@ -123,14 +123,20 @@ def find_pkg_files(directory_path):
     if not path.isdir(directory_path):
         raise ValueError(f"路径 '{directory_path}' 不是文件夹")
 
-    # 获取文件夹中所有以 .pkg 或 .ttpkg.js 结尾的文件名
-    files = [
-        f for f in os.listdir(directory_path)
-        if path.isfile(path.join(directory_path, f))
-           and (f.endswith('.pkg') or f.endswith('.ttpkg.js'))
-    ]
+    # 获取文件夹中所有以 .pkg 或 .ttpkg.js 结尾的文件及其大小
+    file_list = []
+    for f in os.listdir(directory_path):
+        file_path = path.join(directory_path, f)
+        if path.isfile(file_path) and (f.endswith('.pkg') or f.endswith('.ttpkg.js')):
+            # 获取文件大小（字节）
+            file_size = path.getsize(file_path)
+            file_list.append((f, file_size))
 
-    return files
+    # 按文件大小从大到小排序
+    file_list.sort(key=lambda x: x[1], reverse=True)
+
+    # 返回排序后的文件名列表
+    return [f[0] for f in file_list]
 
 
 def process_ttss(fname):
@@ -340,20 +346,33 @@ def processTtmlByAst(input_file_name):
     source = ''.join(f.readlines())
     f.close()
     pageJs = source.split("window.$m_")[1:]
-    pageList = {}
+    global PAGE_LIST
     for page in pageJs:
+        base_begin_str = "window.app."
+        base_end_str = "=$"
         begin_str = "window.app[\""
         end_str = "\"]"
         pageTag = page[0:page.find("=createCommonjsModule")]  # 裁剪出模块名称
+        filename = ""
+        file_name_begin = -1
         if page.find(begin_str) != -1:
             file_name_begin = page.find(begin_str) + len(begin_str)
             file_name_end = page.find(end_str, file_name_begin)
             filename = page[file_name_begin:file_name_end]
-            # 存入页面列表，方便后续解析其他模块导入时使用
-            pageList[pageTag] = filename
+
+        elif page.find(base_begin_str) != -1:
+            file_name_begin = page.find(base_begin_str) + len(base_begin_str)
+            file_name_end = page.find(base_end_str, file_name_begin)
+            filename = page[file_name_begin:file_name_end]
+            # 重置为新的开始字符串
+            begin_str = base_begin_str
+        # 存入页面列表，方便后续解析其他模块导入时使用
+        PAGE_LIST[pageTag] = filename
+        if file_name_begin > 0:
             logger.info(f"Decompiling {filename}.ttml")
             astJs = page[0:file_name_begin - len(begin_str) - 1]
-            ast_parse_ttml_js.run(astJs, pageList, path.join(OUTPUT_FOLDER, filename + ".ttml"))
+            ast_parse_ttml_js.run(astJs, PAGE_LIST, OUTPUT_FOLDER + "/" + filename + ".ttml")
+
 
 
 def end():
