@@ -5,6 +5,7 @@ import shutil
 
 import ast_parse_ttml_js
 from model.mpk import MPK
+from loguru import logger
 
 OUTPUT_FOLDER = ""
 COMMON_STYLESHEETS = {}
@@ -48,24 +49,24 @@ def delete_file(file_path):
     try:
         # 检查文件是否存在
         if not os.path.exists(file_path):
-            # print(f"文件 {file_path} 不存在")
+            # logger.info(f"文件 {file_path} 不存在")
             return False
 
         # 确保路径是文件而非目录
         if not os.path.isfile(file_path):
-            # print(f"{file_path} 不是文件")
+            # logger.info(f"{file_path} 不是文件")
             return False
 
         # 删除文件
         os.remove(file_path)
-        # print(f"成功删除文件: {file_path}")
+        # logger.info(f"成功删除文件: {file_path}")
         return True
 
     except PermissionError:
-        # print(f"无权限删除文件: {file_path}")
+        # logger.info(f"无权限删除文件: {file_path}")
         return False
     except Exception as e:
-        # print(f"删除文件 {file_path} 失败: {e}")
+        # logger.info(f"删除文件 {file_path} 失败: {e}")
         return False
 
 
@@ -92,9 +93,9 @@ def write_to_file(filename, content, output_dir="output"):
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        # print(f"成功写入文件: {file_path}")
+        # logger.info(f"成功写入文件: {file_path}")
     except Exception as e:
-        print(f"写入文件 {file_path} 失败: {e}")
+        logger.error(f"写入文件 {file_path} 失败: {e}")
 
 
 def process_ttss(fname):
@@ -116,7 +117,7 @@ def process_ttss(fname):
     if buf[1] == -1:
         buf = get_string_by_seperators(source, "window.CSS_MAP=", ",window.$m", 0)
     if buf[1] == -1:
-        print("获取 CSS_MAP的TTSS文件 失败，请使用解包后的源文件，格式化后的代码无法解析")
+        logger.info("获取 CSS_MAP的TTSS文件 失败，请使用解包后的源文件，格式化后的代码无法解析")
         return
     try:
         # 解析 JSON 字符串
@@ -128,11 +129,11 @@ def process_ttss(fname):
             for filename in ttss_list:
                 content = get_wxss_content(ttss_list[filename])
 
-                print(f"Processing {filename}")
+                logger.info(f"Processing {filename}")
                 COMMON_STYLESHEETS[filename] = content
                 write_to_file(filename, content, OUTPUT_FOLDER)
     except Exception as e:
-        print(f"处理 CSS_MAP 时发生错误: {e}")
+        logger.warning(f"处理 CSS_MAP 时发生错误: {e}")
     parseputCssToHead(source, fname)
 
 
@@ -151,13 +152,13 @@ def parseputCssToHead(source, fname):
                     filename = buf[1]
                     content = get_wxss_content(buf[0])
 
-                    print(f"Processing {filename}")
+                    logger.info(f"Processing {filename}")
                     COMMON_STYLESHEETS[filename] = content
                     write_to_file(filename, content, OUTPUT_FOLDER)
                 except Exception as e:
-                    print(e)
+                    logger.info(e)
         else:
-            # print("其他文件的处理方式" + fname)
+            # logger.info("其他文件的处理方式" + fname)
             index = j.find('),",', 0)
             index1 = j.find(');var', 0)
             if index == -1 and index1 == -1:
@@ -169,11 +170,11 @@ def parseputCssToHead(source, fname):
                 filename = fname.replace("-frame.js", '.ttss').replace(OUTPUT_FOLDER + '/', '')
                 content = get_wxss_content(buf[0])
 
-                print(f"Processing {filename}")
+                logger.info(f"Processing {filename}")
                 COMMON_STYLESHEETS[filename] = content
                 write_to_file(filename, content, OUTPUT_FOLDER)
             except Exception as e:
-                print(e)
+                logger.info(e)
 
 
 def get_wxss_content(buf):
@@ -243,7 +244,7 @@ def processPageJSON():
             pageObj = page[path]
             filename = path + ".json"
             jsonContent = json.dumps(pageObj['window'], indent=4, ensure_ascii=False)
-            print("Processing " + filename)
+            logger.info("Processing " + filename)
             write_to_file(filename, jsonContent, OUTPUT_FOLDER)
             # 删除无用service
             delete_file(OUTPUT_FOLDER + "/" + path + "-service.js")
@@ -275,14 +276,12 @@ def process_package(file):
             if file['offset'] != 0:
                 if file['name'] == '':
                     file['name'] = 'unknown_%s' % i
-                print('Unpacking: %s' % file['name'])
+                logger.info('Unpacking: %s' % file['name'])
                 path_file = '%s/%s' % (OUTPUT_FOLDER, file['name'])
                 dir_file, _ = os.path.split(path_file)
                 os.makedirs(dir_file, exist_ok=True)
                 with open(path_file, 'wb') as io_file:
                     io_file.write(mpk.data(i))
-
-
 # OUT_PATH = "js/038d897.ttpkg.js_unpack/"
 
 def processTtmlByAst(file_path):
@@ -294,25 +293,31 @@ def processTtmlByAst(file_path):
     source = ''.join(f.readlines())
     f.close()
     pageJs = source.split("window.$m_")[1:]
+    pageList = {}
     for page in pageJs:
         begin_str = "window.app[\""
         end_str = "\"]"
-        file_name_begin = page.find(begin_str) + len(begin_str)
-        file_name_end = page.find(end_str, file_name_begin)
-        filename = page[file_name_begin:file_name_end]
-        print(f"Decompiling {filename}.ttml")
-        astJs = page[0:file_name_begin - len(begin_str) - 1]
-        ast_parse_ttml_js.run(astJs, OUTPUT_FOLDER + "/" + filename + ".ttml")
-    pass
+        pageTag = page[0:page.find("=createCommonjsModule")]  # 裁剪出模块名称
+        if page.find(begin_str) != -1:
+            file_name_begin = page.find(begin_str) + len(begin_str)
+            file_name_end = page.find(end_str, file_name_begin)
+            filename = page[file_name_begin:file_name_end]
+            # 存入页面列表，方便后续解析其他模块导入时使用
+            pageList[pageTag] = filename
+            logger.info(f"Decompiling {filename}.ttml")
+            astJs = page[0:file_name_begin - len(begin_str) - 1]
+            ast_parse_ttml_js.run(astJs, pageList, OUTPUT_FOLDER + "/" + filename + ".ttml")
+
 
 def end():
     """
     最后删除不用的文件
     :return:
     """
-    delete_files_list = ["data.js","page-frame.js","preload-modules.json","script.js",]
+    delete_files_list = ["data.js", "page-frame.js", "preload-modules.json", "script.js", ]
     for file_name in delete_files_list:
-        delete_file(OUTPUT_FOLDER+"/"+file_name)
+        delete_file(OUTPUT_FOLDER + "/" + file_name)
+
 
 def main(output_folder, input_file):
     """
@@ -326,21 +331,21 @@ def main(output_folder, input_file):
     file = '/page-frame.js'
     OUTPUT_FOLDER = output_folder  # 设置全局变量
     # 删除输出文件夹
-    rm(OUTPUT_FOLDER)
+    # rm(OUTPUT_FOLDER)
     # 创建输出文件夹
-    md(OUTPUT_FOLDER)
+    # md(OUTPUT_FOLDER)
     # 开始解包小程序包
-    print("Unpacking package...")
-    process_package(input_file)
+    logger.info("Unpacking package...")
+    # process_package(input_file)
     # 反编译全局的 ttss 文件
-    process([file], process_ttss)
+    # process([file], process_ttss)
     # 反编译每个界面的 ttss 文件
-    processPageTtss()
+    # processPageTtss()
     # 构造 page.json 文件
-    processPageJSON()
+    # processPageJSON()
     # 通过 AST 反编译 ttml 文件
     processTtmlByAst(file)
-    print("Operation completed successfully!")
+    logger.info("Operation completed successfully!")
 
 
 if __name__ == "__main__":

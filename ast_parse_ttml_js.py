@@ -1,10 +1,24 @@
+import sys
+
 import esprima
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
-import logging
+from loguru import logger
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+
+# 1. 为不同输出设置不同日志级别
+def set_level_for_handlers():
+    # 添加文件输出，记录 DEBUG 及以上级别
+    logger.add(
+        "logs/app_{time}.log",
+        level="DEBUG",  # 设置文件输出最低级别为 DEBUG
+        rotation="1 MB",  # 按文件大小分割
+        retention="7 days",  # 保留 7 天
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module}:{function}:{line} - {message}"
+    )
+
+
+set_level_for_handlers()
 
 
 @dataclass
@@ -25,13 +39,16 @@ class Context:
 
 
 class ASTConverter:
-    def __init__(self, js_code: str):
+    def __init__(self, js_code: str, pagePath: dict):
         self.js_code = js_code
         self.global_vars: Dict[str, str] = {}
         self.contexts: List[Context] = [Context(params={}, variables={})]
         self.ast = None
         self.strip_chars = '"\''
         self.strip_chars_index = "'"
+        self.importTpls = {}
+        self.pagePath = pagePath
+        self.templateList = []
 
     def parse_ast(self) -> None:
         try:
@@ -61,6 +78,31 @@ class ASTConverter:
                     mappings[var_name] = init.arguments[0].value.replace("tt-", "")
                 elif init.callee.type == 'MemberExpression':
                     mappings[var_name] = init.callee.property.name
+            elif init.type == 'FunctionExpression' and declarator.id.name == '$':
+                importModelList = init.body.body[0].argument.arguments[1:]
+                for modelName in importModelList:
+                    import_name = modelName.object.name.replace("$m_", "")
+                    self.importTpls[import_name] = self.pagePath[import_name]
+                    print("找到导包函数", declarator.id.name, import_name)
+            elif init.type == 'SequenceExpression' and init.expressions[0].type == 'MemberExpression' and \
+                    init.expressions[0].property.name == 'VOID':
+
+                express_1 = init.expressions[1]
+                if express_1.type == 'MemberExpression':
+                    prop = express_1.property.name if express_1.property.type == 'Identifier' else express_1.property.value
+                    mappings[var_name] = f"$.{prop}"
+                elif express_1.type == "CallExpression" and mappings[
+                    express_1.callee.name] == '$.resolveBuiltinComponent':
+                    prop = express_1.arguments[0].value.replace("tt-", "")
+                    mappings[var_name] = prop
+                    pass
+            elif init.type == 'ObjectExpression' and len(init.properties) == 0:
+                # tpls的空对象
+                mappings[var_name] = "$.tpls"
+                pass
+            else:
+                logger.warning(f"未处理的参数：{init.type}")
+
         return mappings
 
     def extract_path(self, node: Any, context: Context, for_loop: bool = False, for_class: bool = False) -> str:
@@ -120,6 +162,8 @@ class ASTConverter:
             argument = self.extract_path(node.argument, context, for_loop, for_class)
             if operator == '!':
                 return f"!{argument}"
+            elif operator=='void':
+                return 'undefined'
             logger.warning(f"未支持的 UnaryExpression 运算符: {operator}")
             return 'unknown'
 
@@ -182,11 +226,12 @@ class ASTConverter:
             elif node.callee.type == 'MemberExpression':
                 return self.extract_path(node.arguments[0], context, for_loop, for_class)
 
-
         logger.warning(f"未处理节点类型: {node.type}")
         return 'unknown'
 
     def resolve_component_name(self, component: Any, context: Context) -> str:
+        if hasattr(component, 'name') and context.get_variable(component.name) is not None:
+            return context.get_variable(component.name)
         if hasattr(component, 'name') and self.global_vars.get(component.name) == '$.Fragment':
             return "template"
         elif hasattr(component, 'name') and context.get_variable(component.name) == 'frame-animation':
@@ -267,14 +312,16 @@ class ASTConverter:
                 if value is None or not hasattr(value, 'type'):
                     logger.warning(f"无效 src 属性: {value}")
                     ttml += ' src=""'
-                elif value.type in ['BinaryExpression', 'CallExpression', 'MemberExpression']:
+                elif value.type in ['BinaryExpression', 'CallExpression', 'MemberExpression','LogicalExpression']:
                     path = self.extract_path(value, context).replace("\"", "'")
                     ttml += f' src="{{{{{path}}}}}"' if path != 'unknown' else ' src=""'
-                elif hasattr(value, 'raw') and value.raw is not None:
-                    ttml += " src=\"%s\"" % "{{" + value.raw.strip('"') + "}}"
                 elif value.type == 'ConditionalExpression':
                     path = self.extract_path(value, context).replace("\"", "'")
                     ttml += " src=\"%s\"" % ("{{" + path + "}}")
+                elif value.type =='Literal':
+                    ttml += " src=\"%s\"" % value.value
+                elif hasattr(value, 'raw') and value.raw is not None:
+                    ttml += " src=\"%s\"" % ("{{" + value.raw.strip('"') + "}}")
                 else:
                     logger.warning(f"无法解析 src 属性: {value.type}")
                     ttml += ' src=""'
@@ -368,7 +415,7 @@ class ASTConverter:
             ttml += "  " * indent + f"</{component_name}>\n"
 
         elif node.type == 'CallExpression' and hasattr(node.callee, 'name') and self.global_vars.get(
-                node.callee.name) == '$.renderList':
+                node.callee.name) in ['$.renderList']:
             list_name = self.extract_path(node.arguments[0], context, for_loop=True)
             if list_name == 'unknown':
                 logger.warning(f"无法解析 renderList 的列表路径: {node.arguments[0].type}")
@@ -396,6 +443,21 @@ class ASTConverter:
                     ttml += child_ttml
                     ttml += "  " * indent + "</block>\n"
             self.contexts.pop()
+        elif node.type == 'CallExpression' and hasattr(node.callee, 'name') and self.global_vars.get(
+                node.callee.name) in ['$.renderTemplate']:
+            """
+            处理类似下面这种导入函数数据：
+            <import src="./inline-components.ttml" />
+            <import src="./new-inline-components.ttml" />
+            <template tt:if="{{customView}}" is="{{customView}}"></template>
+            """
+            importList = node.arguments[1]
+            if importList.type == 'Identifier' and importList.name == '$':
+                isValue = self.extract_path(node.arguments[2], context)
+                for importPage in self.importTpls:
+                    # 确保路径是从根目录开始，需要添加/开头
+                    ttml += "  " * indent + f"<import src=\"/{self.importTpls[importPage]}\"/>\n"
+                ttml += "  " * indent + f"<template is=\"{{{{{isValue}}}}}\"></template>"
 
         elif node.type == 'ConditionalExpression':
             condition = self.extract_path(node.test, context)
@@ -410,6 +472,9 @@ class ASTConverter:
                     condition = f"!{condition}"
                 elif node.test.type == 'UnaryExpression' and node.test.operator == '!':
                     condition = self.extract_path(node.test.argument, context)
+                elif node.test.type == 'LogicalExpression':
+                    condition = self.extract_path(node.test,context)
+
                 else:
                     logger.warning(f"无法反转条件: {node.test.type}")
                     return ""
@@ -428,57 +493,106 @@ class ASTConverter:
                         ttml += alternate_ttml
                         ttml += "  " * indent + "</block>\n"
                 return ttml
-
-            # 处理常规条件表达式
-            consequent_ttml = self.convert_to_ttml(node.consequent, indent, context)
-            if consequent_ttml.strip():
-                lines = consequent_ttml.split('\n')
-                first_line = lines[0]
-                if first_line.strip().startswith('<'):
-                    tag_start = first_line.find('<')
-                    tag_end = first_line.find(' ', tag_start)
-                    ttml += first_line[:tag_end] + f' tt:if="{{{{{condition}}}}}"' + first_line[tag_end:] + '\n'
-                    ttml += '\n'.join(lines[1:])
-                else:
-                    ttml += "  " * indent + f"<block tt:if=\"{{{{{condition}}}}}\">\n"
-                    ttml += consequent_ttml
-                    ttml += "  " * indent + "</block>\n"
-
-            alternate = node.alternate
-            while alternate.type == 'ConditionalExpression':
-                condition = self.extract_path(alternate.test, context)
-                if condition == 'unknown':
-                    logger.warning(f"无法解析嵌套条件表达式: {alternate.test.type}")
-                    break
-                alternate_ttml = self.convert_to_ttml(alternate.consequent, indent, context)
-                if alternate_ttml.strip():
-                    lines = alternate_ttml.split('\n')
+            elif node.consequent.type == "CallExpression" and self.global_vars.get(
+                    node.consequent.callee.name) == '$.renderTemplate':
+                # 自定义渲染模块的处理
+                consequent_ttml = self.convert_to_ttml(node.consequent, indent, context)
+                if consequent_ttml.strip():
+                    lines = consequent_ttml.split('\n')
+                    last_line = lines[len(lines) - 1]
+                    if last_line.strip().startswith('<'):
+                        tag_start = last_line.find('<')
+                        tag_end = last_line.find(' ', tag_start)
+                        ttml += '\n'.join(lines[:-1]) + "\n"
+                        ttml += last_line[:tag_end] + f' tt:if="{{{{{condition}}}}}"' + last_line[tag_end:] + '\n'
+                alternate = node.alternate
+                while alternate.type == 'ConditionalExpression':
+                    condition = self.extract_path(alternate.test, context)
+                    if condition == 'unknown':
+                        logger.warning(f"无法解析嵌套条件表达式: {alternate.test.type}")
+                        break
+                    alternate_ttml = self.convert_to_ttml(alternate.consequent, indent, context)
+                    if alternate_ttml.strip():
+                        lines = alternate_ttml.split('\n')
+                        first_line = lines[0]
+                        if first_line.strip().startswith('<'):
+                            tag_start = first_line.find('<')
+                            tag_end = first_line.find(' ', tag_start)
+                            ttml += first_line[:tag_end] + f' tt:elif="{{{{{condition}}}}}"' + first_line[
+                                                                                               tag_end:] + '\n'
+                            ttml += '\n'.join(lines[1:])
+                        else:
+                            ttml += "  " * indent + f"<block tt:elif=\"{{{{{condition}}}}}\">\n"
+                            ttml += alternate_ttml
+                            ttml += "  " * indent + "</block>\n"
+                    alternate = alternate.alternate
+                if alternate.type != 'Identifier':
+                    alternate_ttml = self.convert_to_ttml(alternate, indent, context)
+                    if alternate_ttml.strip():
+                        lines = alternate_ttml.split('\n')
+                        first_line = lines[0]
+                        if first_line.strip().startswith('<'):
+                            tag_start = first_line.find('<')
+                            tag_end = first_line.find(' ', tag_start)
+                            ttml += first_line[:tag_end] + ' tt:else' + first_line[tag_end:] + '\n'
+                            ttml += '\n'.join(lines[1:])
+                        else:
+                            ttml += "  " * indent + "<block tt:else>\n"
+                            ttml += alternate_ttml
+                            ttml += "  " * indent + "</block>\n"
+                return ttml
+            else:
+                # 处理常规条件表达式
+                consequent_ttml = self.convert_to_ttml(node.consequent, indent, context)
+                if consequent_ttml.strip():
+                    lines = consequent_ttml.split('\n')
                     first_line = lines[0]
                     if first_line.strip().startswith('<'):
                         tag_start = first_line.find('<')
                         tag_end = first_line.find(' ', tag_start)
-                        ttml += first_line[:tag_end] + f' tt:elif="{{{{{condition}}}}}"' + first_line[tag_end:] + '\n'
+                        ttml += first_line[:tag_end] + f' tt:if="{{{{{condition}}}}}"' + first_line[tag_end:] + '\n'
                         ttml += '\n'.join(lines[1:])
                     else:
-                        ttml += "  " * indent + f"<block tt:elif=\"{{{{{condition}}}}}\">\n"
-                        ttml += alternate_ttml
+                        ttml += "  " * indent + f"<block tt:if=\"{{{{{condition}}}}}\">\n"
+                        ttml += consequent_ttml
                         ttml += "  " * indent + "</block>\n"
-                alternate = alternate.alternate
 
-            if alternate.type != 'Identifier' or alternate.name not in ['r', 'c']:
-                alternate_ttml = self.convert_to_ttml(alternate, indent, context)
-                if alternate_ttml.strip():
-                    lines = alternate_ttml.split('\n')
-                    first_line = lines[0]
-                    if first_line.strip().startswith('<'):
-                        tag_start = first_line.find('<')
-                        tag_end = first_line.find(' ', tag_start)
-                        ttml += first_line[:tag_end] + ' tt:else' + first_line[tag_end:] + '\n'
-                        ttml += '\n'.join(lines[1:])
-                    else:
-                        ttml += "  " * indent + "<block tt:else>\n"
-                        ttml += alternate_ttml
-                        ttml += "  " * indent + "</block>\n"
+                alternate = node.alternate
+                while alternate.type == 'ConditionalExpression':
+                    condition = self.extract_path(alternate.test, context)
+                    if condition == 'unknown':
+                        logger.warning(f"无法解析嵌套条件表达式: {alternate.test.type}")
+                        break
+                    alternate_ttml = self.convert_to_ttml(alternate.consequent, indent, context)
+                    if alternate_ttml.strip():
+                        lines = alternate_ttml.split('\n')
+                        first_line = lines[0]
+                        if first_line.strip().startswith('<'):
+                            tag_start = first_line.find('<')
+                            tag_end = first_line.find(' ', tag_start)
+                            ttml += first_line[:tag_end] + f' tt:elif="{{{{{condition}}}}}"' + first_line[
+                                                                                               tag_end:] + '\n'
+                            ttml += '\n'.join(lines[1:])
+                        else:
+                            ttml += "  " * indent + f"<block tt:elif=\"{{{{{condition}}}}}\">\n"
+                            ttml += alternate_ttml
+                            ttml += "  " * indent + "</block>\n"
+                    alternate = alternate.alternate
+
+                if alternate.type != 'Identifier':
+                    alternate_ttml = self.convert_to_ttml(alternate, indent, context)
+                    if alternate_ttml.strip():
+                        lines = alternate_ttml.split('\n')
+                        first_line = lines[0]
+                        if first_line.strip().startswith('<'):
+                            tag_start = first_line.find('<')
+                            tag_end = first_line.find(' ', tag_start)
+                            ttml += first_line[:tag_end] + ' tt:else' + first_line[tag_end:] + '\n'
+                            ttml += '\n'.join(lines[1:])
+                        else:
+                            ttml += "  " * indent + "<block tt:else>\n"
+                            ttml += alternate_ttml
+                            ttml += "  " * indent + "</block>\n"
 
         elif node.type == 'CallExpression' and hasattr(node.callee, 'name') and self.global_vars.get(
                 node.callee.name) == '$.$ss':
@@ -494,7 +608,16 @@ class ASTConverter:
                 logger.error(f"尝试处理未知节点：{node.arguments[0].type}")
                 path = self.extract_path(node.arguments[0], context, for_loop=False)
                 ttml += "  " * indent + "{{" + path + "}}" + "\n"
-
+        elif node.type == 'Identifier':
+            # 单纯变量不处理
+            pass
+        elif node.type == 'CallExpression' and hasattr(node.callee, 'name') and self.global_vars.get(
+            node.callee.name) == '$.renderSlot':
+            arguments = node.arguments
+            name = arguments[1].value
+            ttml += "  " * indent + f"<slot name=\"{name}\">\n"
+            ttml += self.convert_to_ttml(arguments[2],indent,context)
+            ttml += "  " * indent + "</slot>\n"
 
         else:
             logger.warning(f"无法处理的节点类型: {node.type}")
@@ -509,7 +632,7 @@ class ASTConverter:
                 if objFun.type == "ExpressionStatement":
                     # 获取render节点
                     for expression in objFun.expression.expressions:
-                        if expression.left and expression.left.property and expression.left.property.name =='render':
+                        if expression.left and expression.left.property and expression.left.property.name == 'render':
                             render_function = expression.right
                     break
             if render_function == None:
@@ -529,6 +652,9 @@ class ASTConverter:
             if node.type == 'VariableDeclaration':
                 self.global_vars.update(self.extract_variable_mappings(node))
                 logger.debug(f"Global variables updated: {self.global_vars}")
+            if node.type == 'ExpressionStatement':
+                # 模板定义处理
+                self.templateList = node.expression.expressions
 
         for node in render_function.body.body:
             if node.type == 'VariableDeclaration':
@@ -545,14 +671,50 @@ class ASTConverter:
             logger.error("未找到 render 函数的返回语句")
             raise SystemExit(1)
 
-        ttml_content = ""
+        ttml_content = self.convert_to_template()
         ttml_content += self.convert_to_ttml(render_body, context=self.contexts[0])
         ttml_content += ""
         return ttml_content
 
+    def convert_to_template(self):
+        templates = []
+        for template in self.templateList:
+            if template.type == "AssignmentExpression" and template.left.type == "MemberExpression" and template.right.type == "FunctionExpression":
+                left = template.left
+                right = template.right
+                name = left.property.value
+                if name == 'render':
+                    # 普通内容渲染函数，直接跳过
+                    continue
+                params = right.params
+                new_context = Context(
+                    params={params[0].name: "_data",
+                            params[1].name: "_ctx"
+                            },
+                    variables={},
+                    parent=self.contexts[0]
+                )
+                self.contexts.append(new_context)
+                render_body = None
+                for node in right.body.body:
+                    if node.type == 'VariableDeclaration':
+                        self.contexts[1].variables.update(self.extract_variable_mappings(node))
+                        logger.debug(f"Template variables updated: {self.contexts[1].variables}")
+                    if node.type == 'ReturnStatement':
+                        render_body = node.argument
+                if render_body is not None and name is not None:
+                    ttml_content = f'<template name="{name}">\n'
+                    ttml_content += self.convert_to_ttml(render_body, context=self.contexts[1])
+                    ttml_content += "</template>"
+                    templates.append(ttml_content)
+                self.contexts.pop()
 
-def run(js_code: str, output_file: str = "output.ttml") -> None:
-    converter = ASTConverter(js_code)
+        return "\n".join(templates)
+        pass
+
+
+def run(js_code: str, pagePath: dict, output_file: str = "output.ttml") -> None:
+    converter = ASTConverter(js_code, pagePath=pagePath)
     ttml_content = converter.convert()
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(ttml_content)
@@ -564,7 +726,8 @@ if __name__ == "__main__":
         # 这里是单文件调试，输入对应的page-frame.js文件对应的地址，可以吧page-frame.js的内容复制到js_code.js里进行调试
         with open("js_code.js", mode="r", encoding="utf-8") as file:
             js_code = "".join(file.readlines())
-        run(js_code)
+        pagePath = {'PagesAPIInlinecomponents_d88ee561': "pages/API/inline-components.ttml"}
+        run(js_code, pagePath)
     except FileNotFoundError:
         logger.error("未找到 js_code.js 文件")
         raise SystemExit(1)
