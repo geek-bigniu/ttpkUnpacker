@@ -3,7 +3,7 @@
 ## 开源地址
 
 - 国内gitee: [https://gitee.com/bignius/ttpkUnpacker](https://gitee.com/bignius/ttpkUnpacker)
-- GITHUB: [https://github.com/geek-bigniu/history-list](https://github.com/geek-bigniu/history-list)
+- GITHUB: [https://github.com/geek-bigniu/ttpkUnpacker](https://github.com/geek-bigniu/ttpkUnpacker)
 
 > **注意**：目前暂不支持解包抖音小游戏的包。  
 > 适用于文件开头为 `TPKG` 的抖音小程序包，支持 `.pkg` 文件和 `.ttpkg.js` 文件。
